@@ -91,7 +91,7 @@
         <div id="result">Ready to scan...</div>
     </div>
 
-    <!-- Local QuaggaJS file (minified source you provided) -->
+    <!-- Local QuaggaJS file -->
     <script src="quagga.min.js"></script>
     
     <script>
@@ -103,6 +103,7 @@
         function updateResult(text, className = '') {
             resultDiv.textContent = text;
             resultDiv.className = className;
+            console.log(`Result: ${text}`); // Debug log
         }
 
         function toggleButtons() {
@@ -118,48 +119,52 @@
                 constraints: {
                     width: { ideal: 640 },
                     height: { ideal: 480 },
-                    facingMode: "environment"
+                    facingMode: "environment" // Rear camera
                 },
-                area: {
-                    top: "20%",
-                    right: "20%",
-                    left: "20%",
-                    bottom: "20%"
+                area: { // Expand scanning area for better detection
+                    top: "10%",
+                    right: "10%",
+                    left: "10%",
+                    bottom: "10%"
                 }
             },
             locator: {
-                patchSize: "medium",
-                halfSample: true
+                patchSize: "medium", // Try "small" or "large" if needed
+                halfSample: false // Disable halfSample for better accuracy
             },
-            numOfWorkers: navigator.hardwareConcurrency || 4,
+            numOfWorkers: 0, // Set to 0 for simpler execution, increase if performance allows
             decoder: {
-                readers: [
+                readers: [ // Ensure all common barcode formats are included
                     "code_128_reader",
                     "ean_reader",
                     "ean_8_reader",
                     "code_39_reader",
                     "codabar_reader",
                     "upc_reader",
-                    "upc_e_reader"
+                    "upc_e_reader",
+                    "i2of5_reader"
                 ],
                 multiple: false
             },
-            locate: true
+            locate: true, // Enable locator for better detection
+            frequency: 10 // Increase frequency for faster scanning
         };
 
         startBtn.addEventListener('click', () => {
             if (!isScanning) {
                 if (typeof Quagga === 'undefined') {
-                    updateResult('Error: QuaggaJS library not loaded', 'error');
+                    updateResult('Error: QuaggaJS library not loaded. Check if quagga.min.js is correctly included.', 'error');
                     return;
                 }
-                
+
+                console.log('Initializing Quagga with config:', config); // Debug config
                 Quagga.init(config, (err) => {
                     if (err) {
-                        updateResult(`Error: ${err.message}`, 'error');
-                        console.error(err);
+                        updateResult(`Initialization Error: ${err.message}`, 'error');
+                        console.error('Quagga init error:', err);
                         return;
                     }
+                    console.log('Quagga initialized successfully');
                     Quagga.start();
                     isScanning = true;
                     toggleButtons();
@@ -181,21 +186,23 @@
             const code = result.codeResult.code;
             const format = result.codeResult.format;
             updateResult(`Scanned: ${code} (${format})`, 'success');
-            
-            setTimeout(() => {
-                if (isScanning) {
-                    updateResult('Scanning...');
-                }
-            }, 2000);
+            console.log('Barcode detected:', result.codeResult); // Debug detection
+            // Uncomment to stop after detection:
+            // Quagga.stop();
+            // isScanning = false;
+            // toggleButtons();
         });
 
         Quagga.onProcessed((result) => {
             const drawingCtx = Quagga.canvas.ctx.overlay;
             const drawingCanvas = Quagga.canvas.dom.overlay;
 
-            drawingCtx.clearRect(0, 0, 
-                drawingCanvas.width, 
-                drawingCanvas.height);
+            if (!drawingCtx || !drawingCanvas) {
+                console.warn('Overlay canvas not initialized yet');
+                return;
+            }
+
+            drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
 
             if (result) {
                 if (result.box) {
@@ -213,9 +220,15 @@
             }
         });
 
+        // Check camera availability
         navigator.mediaDevices.getUserMedia({ video: true })
+            .then((stream) => {
+                console.log('Camera access granted');
+                stream.getTracks().forEach(track => track.stop()); // Stop immediately, just testing
+            })
             .catch(err => {
-                updateResult('Camera access denied. Please allow camera permissions.', 'error');
+                updateResult('Camera access denied. Please allow camera permissions and ensure a camera is available.', 'error');
+                console.error('Camera error:', err);
             });
 
         window.addEventListener('beforeunload', () => {
