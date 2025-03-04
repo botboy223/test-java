@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Enhanced Offline Barcode Scanner</title>
+    <title>Enhanced Online Barcode Scanner</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -91,8 +91,8 @@
         <div id="result">Ready to scan...</div>
     </div>
 
-    <!-- Local QuaggaJS file -->
-    <script src="quagga.min.js"></script>
+    <!-- Load QuaggaJS from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
     
     <script>
         const startBtn = document.getElementById('start-btn');
@@ -121,7 +121,7 @@
                     height: { ideal: 480 },
                     facingMode: "environment" // Rear camera
                 },
-                area: { // Expand scanning area for better detection
+                area: { // Expanded scanning area
                     top: "10%",
                     right: "10%",
                     left: "10%",
@@ -129,12 +129,12 @@
                 }
             },
             locator: {
-                patchSize: "medium", // Try "small" or "large" if needed
-                halfSample: false // Disable halfSample for better accuracy
+                patchSize: "medium", // Adjust to "small" or "large" if needed
+                halfSample: false // Disabled for better accuracy
             },
-            numOfWorkers: 0, // Set to 0 for simpler execution, increase if performance allows
+            numOfWorkers: 0, // Set to 0 for simplicity, increase if performance allows
             decoder: {
-                readers: [ // Ensure all common barcode formats are included
+                readers: [ // Common barcode formats
                     "code_128_reader",
                     "ean_reader",
                     "ean_8_reader",
@@ -146,18 +146,18 @@
                 ],
                 multiple: false
             },
-            locate: true, // Enable locator for better detection
-            frequency: 10 // Increase frequency for faster scanning
+            locate: true, // Enable locator
+            frequency: 10 // Faster frame processing
         };
 
         startBtn.addEventListener('click', () => {
             if (!isScanning) {
                 if (typeof Quagga === 'undefined') {
-                    updateResult('Error: QuaggaJS library not loaded. Check if quagga.min.js is correctly included.', 'error');
+                    updateResult('Error: QuaggaJS library not loaded. Check your internet connection.', 'error');
                     return;
                 }
 
-                console.log('Initializing Quagga with config:', config); // Debug config
+                console.log('Initializing Quagga with config:', config);
                 Quagga.init(config, (err) => {
                     if (err) {
                         updateResult(`Initialization Error: ${err.message}`, 'error');
@@ -186,7 +186,7 @@
             const code = result.codeResult.code;
             const format = result.codeResult.format;
             updateResult(`Scanned: ${code} (${format})`, 'success');
-            console.log('Barcode detected:', result.codeResult); // Debug detection
+            console.log('Barcode detected:', result.codeResult);
             // Uncomment to stop after detection:
             // Quagga.stop();
             // isScanning = false;
@@ -224,7 +224,7 @@
         navigator.mediaDevices.getUserMedia({ video: true })
             .then((stream) => {
                 console.log('Camera access granted');
-                stream.getTracks().forEach(track => track.stop()); // Stop immediately, just testing
+                stream.getTracks().forEach(track => track.stop()); // Stop stream after checking
             })
             .catch(err => {
                 updateResult('Camera access denied. Please allow camera permissions and ensure a camera is available.', 'error');
