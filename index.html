@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Real-Time Face Detection</title>
+    <title>Real-Time Hand Gesture Detection</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -97,12 +97,11 @@
     </div>
     
     <div id="result-container">
-        <div id="result">Ready to detect faces...</div>
+        <div id="result">Ready to detect hand gestures...</div>
     </div>
 
-    <!-- Load face-api.js from CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0/dist/tf.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-detection@1.0.1/dist/face-detection.min.js"></script>
+    <!-- Load MediaPipe Hands from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js"></script>
     
     <script>
         const startBtn = document.getElementById('start-btn');
@@ -112,7 +111,7 @@
         const resultDiv = document.getElementById('result');
         let isDetecting = false;
         let stream = null;
-        let detector = null;
+        let hands = null;
         let animationFrameId = null;
 
         function updateResult(text, className = '') {
@@ -126,14 +125,20 @@
             stopBtn.disabled = !isDetecting;
         }
 
-        async function loadModel() {
+        async function loadHands() {
             try {
-                console.log('Loading face detection model...');
-                detector = await faceDetection.createDetector(faceDetection.SupportedModels.MediaPipeFaceDetector, {
-                    runtime: 'tfjs', // Use TensorFlow.js backend
-                    maxFaces: 10 // Maximum number of faces to detect
+                console.log('Loading MediaPipe Hands...');
+                hands = new Hands({
+                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`
                 });
-                console.log('Model loaded successfully');
+                hands.setOptions({
+                    maxNumHands: 2, // Detect up to 2 hands
+                    modelComplexity: 1, // 0 (faster) or 1 (more accurate)
+                    minDetectionConfidence: 0.5,
+                    minTrackingConfidence: 0.5
+                });
+                hands.onResults(onResults);
+                console.log('Hands model loaded successfully');
             } catch (err) {
                 updateResult(`Model Loading Error: ${err.message}`, 'error');
                 console.error('Model loading error:', err);
@@ -154,36 +159,61 @@
             }
         }
 
-        function drawDetections(detections) {
+        function countFingers(landmarks) {
+            const fingerTips = [4, 8, 12, 16, 20]; // Thumb, Index, Middle, Ring, Pinky
+            const fingerBases = [2, 5, 9, 13, 17]; // Base of each finger
+            let raisedFingers = 0;
+
+            // Check each finger (simplified: tip above base = raised)
+            fingerTips.forEach((tipIdx, i) => {
+                const tip = landmarks[tipIdx];
+                const base = landmarks[fingerBases[i]];
+                if (tip.y < base.y) { // Tip is above base in y-coordinate (screen top is 0)
+                    raisedFingers++;
+                }
+            });
+
+            return raisedFingers;
+        }
+
+        function drawLandmarks(results) {
             const ctx = overlay.getContext('2d');
             overlay.width = video.videoWidth;
             overlay.height = video.videoHeight;
             ctx.clearRect(0, 0, overlay.width, overlay.height);
 
-            detections.forEach(detection => {
-                const { x, y, width, height } = detection.box;
-                ctx.beginPath();
-                ctx.rect(x, y, width, height);
-                ctx.lineWidth = 2;
-                ctx.strokeStyle = '#00FF00';
-                ctx.stroke();
-            });
+            if (results.multiHandLandmarks) {
+                for (const landmarks of results.multiHandLandmarks) {
+                    // Draw connections
+                    drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 2 });
+                    // Draw landmarks
+                    drawLandmarks(ctx, landmarks, { color: '#FF0000', lineWidth: 1, radius: 4 });
+                }
+            }
         }
 
-        async function detectFaces() {
-            if (!detector || !video.readyState === 4) return; // Ensure video and model are ready
+        function onResults(results) {
+            drawLandmarks(results);
+            let totalFingers = 0;
+            let handsDetected = 0;
 
-            const detections = await detector.estimateFaces(video);
-            drawDetections(detections);
-
-            if (detections.length > 0) {
-                updateResult(`Detected ${detections.length} face${detections.length > 1 ? 's' : ''}`, 'success');
+            if (results.multiHandLandmarks) {
+                handsDetected = results.multiHandLandmarks.length;
+                for (const landmarks of results.multiHandLandmarks) {
+                    const fingers = countFingers(landmarks);
+                    totalFingers += fingers;
+                }
+                updateResult(`Detected ${handsDetected} hand${handsDetected > 1 ? 's' : ''} with ${totalFingers} finger${totalFingers > 1 ? 's' : ''} raised`, 'success');
             } else {
-                updateResult('Scanning for faces...', '');
+                updateResult('Scanning for hands...', '');
             }
+        }
 
+        async function detectHands() {
+            if (!hands || !video.readyState === 4) return;
+            await hands.send({ image: video });
             if (isDetecting) {
-                animationFrameId = requestAnimationFrame(detectFaces); // Continue detection
+                animationFrameId = requestAnimationFrame(detectHands);
             }
         }
 
@@ -192,17 +222,17 @@
                 updateResult('Initializing...', '');
                 toggleButtons();
 
-                if (!detector) {
-                    await loadModel();
+                if (!hands) {
+                    await loadHands();
                 }
                 if (!stream) {
                     await startVideo();
                 }
 
-                if (detector && stream) {
+                if (hands && stream) {
                     isDetecting = true;
                     toggleButtons();
-                    detectFaces();
+                    detectHands();
                 } else {
                     toggleButtons();
                 }
