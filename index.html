@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Hand Gesture Mouse Control & Paint</title>
+    <title>Hand Gesture Cursor & Paint</title>
     <link href="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.css" rel="stylesheet">
     <script src="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.js"></script>
     <style>
@@ -12,7 +12,6 @@
             color: #3d3d3d;
             --mdc-theme-primary: #007f8b;
             --mdc-theme-on-primary: #f1f3f4;
-            cursor: none; /* Hide default cursor */
         }
 
         h1 {
@@ -81,12 +80,11 @@
 
         button, select {
             padding: 5px;
-            cursor: none; /* Ensure no default cursor on buttons */
         }
     </style>
 </head>
 <body>
-    <h1>Hand Gesture Mouse Control & Paint</h1>
+    <h1>Hand Gesture Cursor & Paint</h1>
 
     <section id="demos" class="invisible">
         <div id="container">
@@ -172,27 +170,31 @@
         };
         createGestureRecognizer();
 
-        // Toolbar event listeners
-        colorPicker.addEventListener("change", (e) => {
+        // Toolbar event listeners for click simulation
+        function addClickListener(element, callback) {
+            element.addEventListener("click", callback);
+        }
+
+        addClickListener(colorPicker, (e) => {
             currentColor = e.target.value;
             isEraser = false;
         });
 
-        brushSize.addEventListener("change", (e) => {
+        addClickListener(brushSize, (e) => {
             currentSize = parseInt(e.target.value);
         });
 
-        brushTool.addEventListener("click", () => {
+        addClickListener(brushTool, () => {
             isBrushActive = true;
             isEraser = false;
         });
 
-        eraserTool.addEventListener("click", () => {
+        addClickListener(eraserTool, () => {
             isBrushActive = true;
             isEraser = true;
         });
 
-        clearCanvas.addEventListener("click", () => {
+        addClickListener(clearCanvas, () => {
             canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
         });
 
@@ -242,7 +244,7 @@
                 const results = gestureRecognizer.recognizeForVideo(video, nowInMs);
 
                 if (results.landmarks && results.landmarks.length > 0) {
-                    // Index finger tip (landmark 8) controls cursor across entire page
+                    // Index finger tip controls cursor across entire page
                     const indexFingerTip = results.landmarks[0][8];
                     const screenX = (1 - indexFingerTip.x) * window.innerWidth; // Mirror x
                     const screenY = indexFingerTip.y * window.innerHeight;
@@ -262,14 +264,16 @@
                     const canvasX = screenX - canvasRect.left;
                     const canvasY = screenY - canvasRect.top;
 
-                    // Check if cursor is over canvas
+                    // Check if cursor is over canvas or toolbar
                     const isOverCanvas = canvasX >= 0 && canvasX <= canvas.width && 
-                                      canvasY >= 0 && canvasY <= canvas.height;
+                                       canvasY >= 0 && canvasY <= canvas.height;
+                    const isOverToolbar = screenY <= document.getElementById("toolbar").getBoundingClientRect().bottom;
 
                     if (gestureName === "Pointing_Up" || gestureName === "Pointing") {
-                        if (hasMiddleFingerExtended) { // Index + Middle = Click/Paint
-                            simulateClick(screenX, screenY);
-                            if (isOverCanvas && isBrushActive) {
+                        if (hasMiddleFingerExtended) { // Index + Middle = Action
+                            if (isOverToolbar) {
+                                simulateClick(screenX, screenY);
+                            } else if (isOverCanvas && isBrushActive) {
                                 if (!isDrawing) {
                                     isDrawing = true;
                                     lastX = canvasX;
@@ -287,7 +291,7 @@
                                 lastX = canvasX;
                                 lastY = canvasY;
                             }
-                        } else { // Only index = Move cursor
+                        } else { // Only index = Cursor movement
                             isDrawing = false;
                         }
                     } else {
@@ -309,6 +313,8 @@
                     element.click();
                     if (element === colorPicker || element === brushSize) {
                         element.focus();
+                        // For select elements, simulate change event
+                        element.dispatchEvent(new Event("change"));
                     }
                 }
             });
