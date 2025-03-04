@@ -152,7 +152,6 @@
         let currentColor = "#000000";
         let currentSize = 5;
         let isEraser = false;
-        let isBrushActive = false;
 
         const createGestureRecognizer = async () => {
             const vision = await FilesetResolver.forVisionTasks(
@@ -186,12 +185,10 @@
         });
 
         addClickListener(brushTool, () => {
-            isBrushActive = true;
             isEraser = false;
         });
 
         addClickListener(eraserTool, () => {
-            isBrushActive = true;
             isEraser = true;
         });
 
@@ -278,28 +275,26 @@
                     const isOverToolbar = screenY <= document.getElementById("toolbar").getBoundingClientRect().bottom;
 
                     if (gestureName === "Pointing_Up" || gestureName === "Pointing") {
-                        if (hasMiddleFingerExtended) { // Index + Middle = Action
-                            if (isOverToolbar) {
-                                simulateClick(screenX, screenY);
-                            } else if (isOverCanvas && isBrushActive) {
-                                if (!isDrawing) {
-                                    isDrawing = true;
-                                    lastX = canvasX;
-                                    lastY = canvasY;
-                                }
-                                
-                                canvasCtx.beginPath();
-                                canvasCtx.moveTo(lastX, lastY);
-                                canvasCtx.lineTo(canvasX, canvasY);
-                                canvasCtx.strokeStyle = isEraser ? "#FFFFFF" : currentColor;
-                                canvasCtx.lineWidth = isEraser ? currentSize * 2 : currentSize;
-                                canvasCtx.lineCap = "round";
-                                canvasCtx.stroke();
-
+                        if (hasMiddleFingerExtended && isOverToolbar) { // Index + Middle = Toolbar Click
+                            simulateClick(screenX, screenY);
+                        } else if (isOverCanvas) { // Index only = Paint on canvas
+                            if (!isDrawing) {
+                                isDrawing = true;
                                 lastX = canvasX;
                                 lastY = canvasY;
                             }
-                        } else { // Only index = Cursor movement
+                            
+                            canvasCtx.beginPath();
+                            canvasCtx.moveTo(lastX, lastY);
+                            canvasCtx.lineTo(canvasX, canvasY);
+                            canvasCtx.strokeStyle = isEraser ? "#FFFFFF" : currentColor;
+                            canvasCtx.lineWidth = isEraser ? currentSize * 2 : currentSize;
+                            canvasCtx.lineCap = "round";
+                            canvasCtx.stroke();
+
+                            lastX = canvasX;
+                            lastY = canvasY;
+                        } else {
                             isDrawing = false;
                         }
                     } else {
