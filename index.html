@@ -4,114 +4,80 @@
     <meta charset="UTF-8">
     <title>Hand Gesture Paint</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/hand-pose-detection"></script>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            text-align: center;
-        }
-        video {
-            display: block;
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            width: 200px;
-            height: 150px;
-            border: 2px solid black;
-        }
-        canvas {
-            border: 2px solid black;
-            background-color: white;
-        }
-        #controls {
-            margin-top: 20px;
-        }
+        body { font-family: Arial, sans-serif; text-align: center; }
+        video { display: block; margin: auto; transform: scaleX(-1); }
+        canvas { border: 2px solid black; display: block; margin: auto; }
+        .toolbar { margin-top: 10px; }
+        button { margin: 5px; padding: 10px; font-size: 16px; }
     </style>
 </head>
 <body>
     <h1>Hand Gesture Paint</h1>
-    <video id="video" autoplay></video>
-    <canvas id="paintCanvas" width="800" height="600"></canvas>
-    <div id="controls">
-        <button onclick="changeColor('black')">Black</button>
-        <button onclick="changeColor('red')">Red</button>
-        <button onclick="changeColor('blue')">Blue</button>
-        <button onclick="changeColor('green')">Green</button>
-        <button onclick="toggleEraser()">Eraser</button>
+    <video id="webcam" autoplay playsinline width="320" height="240"></video>
+    <canvas id="canvas" width="800" height="500"></canvas>
+    <div class="toolbar">
+        <button onclick="setTool('draw')">Brush</button>
+        <button onclick="setTool('eraser')">Eraser</button>
         <button onclick="clearCanvas()">Clear</button>
+        <input type="color" id="colorPicker" onchange="setColor(this.value)">
+        <input type="range" min="1" max="20" value="5" id="brushSize" onchange="setBrushSize(this.value)">
     </div>
+    
     <script>
-        const video = document.getElementById('video');
-        const canvas = document.getElementById('paintCanvas');
-        const ctx = canvas.getContext('2d');
-        let drawing = false;
-        let lastX, lastY;
-        let brushColor = 'black';
-        let erasing = false;
-
-        function changeColor(color) {
-            brushColor = color;
-            erasing = false;
-        }
-
-        function toggleEraser() {
-            erasing = !erasing;
-        }
-
-        function clearCanvas() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-        }
-
+        const video = document.getElementById("webcam");
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+        let tool = "draw";
+        let brushColor = "black";
+        let brushSize = 5;
+        let isDrawing = false;
+        let lastX = 0, lastY = 0;
+        
+        function setTool(selectedTool) { tool = selectedTool; }
+        function setColor(color) { brushColor = color; }
+        function setBrushSize(size) { brushSize = size; }
+        function clearCanvas() { ctx.clearRect(0, 0, canvas.width, canvas.height); }
+        
         async function setupCamera() {
             const stream = await navigator.mediaDevices.getUserMedia({ video: true });
             video.srcObject = stream;
         }
-
         setupCamera();
-
-        // Use Mediapipe Hands
-        const hands = new Hands({ locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
-        hands.setOptions({
-            maxNumHands: 1,
-            minDetectionConfidence: 0.7,
-            minTrackingConfidence: 0.7
-        });
-        const camera = new Camera(video, {
-            onFrame: async () => {
-                await hands.send({ image: video });
-            },
-            width: 640,
-            height: 480
-        });
-        camera.start();
-
-        hands.onResults(results => {
-            ctx.strokeStyle = erasing ? 'white' : brushColor;
-            ctx.lineWidth = erasing ? 20 : 5;
-
-            if (results.multiHandLandmarks.length > 0) {
-                const landmarks = results.multiHandLandmarks[0];
-                const indexFinger = landmarks[8];
-                const middleFinger = landmarks[12];
-
-                const x = indexFinger.x * canvas.width;
-                const y = indexFinger.y * canvas.height;
-
-                if (drawing) {
-                    ctx.beginPath();
-                    ctx.moveTo(lastX, lastY);
-                    ctx.lineTo(x, y);
-                    ctx.stroke();
+        
+        async function detectHands() {
+            const model = await handPoseDetection.createDetector(handPoseDetection.SupportedModels.MediaPipeHands, { runtime: 'tfjs' });
+            setInterval(async () => {
+                const hands = await model.estimateHands(video, { flipHorizontal: true });
+                if (hands.length > 0) {
+                    const indexFinger = hands[0].keypoints[8];
+                    const middleFinger = hands[0].keypoints[12];
+                    
+                    let x = indexFinger.x * (canvas.width / video.width);
+                    let y = indexFinger.y * (canvas.height / video.height);
+                    
+                    if (isDrawing) {
+                        ctx.beginPath();
+                        ctx.moveTo(lastX, lastY);
+                        ctx.lineTo(x, y);
+                        ctx.strokeStyle = tool === "eraser" ? "white" : brushColor;
+                        ctx.lineWidth = brushSize;
+                        ctx.stroke();
+                    }
+                    lastX = x;
+                    lastY = y;
+                    
+                    // Check for pinch (click) gesture
+                    let distance = Math.hypot(indexFinger.x - middleFinger.x, indexFinger.y - middleFinger.y);
+                    isDrawing = distance < 30;
                 }
-                lastX = x;
-                lastY = y;
-
-                // Detect pinch (index + middle fingers close together) for clicking
-                const distance = Math.hypot(indexFinger.x - middleFinger.x, indexFinger.y - middleFinger.y);
-                drawing = distance < 0.05; // Adjust threshold as needed
-            }
-        });
+            }, 50);
+        }
+        detectHands();
     </script>
 </body>
 </html>
