@@ -144,6 +144,7 @@
         const eraserTool = document.getElementById("eraserTool");
         const clearCanvas = document.getElementById("clearCanvas");
         const canvasContainer = document.getElementById("canvasContainer");
+        const webcamButton = document.getElementById("webcamButton");
 
         let isDrawing = false;
         let lastX = 0;
@@ -203,30 +204,37 @@
         }
 
         if (hasGetUserMedia()) {
-            const webcamButton = document.getElementById("webcamButton");
             webcamButton.addEventListener("click", enableCam);
         } else {
             console.warn("getUserMedia() is not supported by your browser");
         }
 
-        function enableCam(event) {
+        function enableCam() {
             if (!gestureRecognizer) {
                 alert("Please wait for gestureRecognizer to load");
                 return;
             }
 
             webcamRunning = !webcamRunning;
-            const button = event.target.querySelector(".mdc-button__label");
-            button.innerText = webcamRunning ? "DISABLE WEBCAM" : "ENABLE WEBCAM";
+            const buttonLabel = webcamButton.querySelector(".mdc-button__label");
+            if (buttonLabel) {
+                buttonLabel.innerText = webcamRunning ? "DISABLE WEBCAM" : "ENABLE WEBCAM";
+            }
 
             if (webcamRunning) {
                 const constraints = { video: true };
                 navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
                     video.srcObject = stream;
                     video.addEventListener("loadeddata", predictWebcam);
+                }).catch((err) => {
+                    console.error("Error accessing webcam:", err);
+                    webcamRunning = false;
+                    if (buttonLabel) buttonLabel.innerText = "ENABLE WEBCAM";
                 });
             } else {
-                video.srcObject.getTracks().forEach(track => track.stop());
+                if (video.srcObject) {
+                    video.srcObject.getTracks().forEach(track => track.stop());
+                }
                 cursor.style.display = "none";
             }
         }
@@ -313,7 +321,6 @@
                     element.click();
                     if (element === colorPicker || element === brushSize) {
                         element.focus();
-                        // For select elements, simulate change event
                         element.dispatchEvent(new Event("change"));
                     }
                 }
