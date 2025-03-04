@@ -2,14 +2,17 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Hand Gesture Paint</title>
+    <title>Hand Gesture Mouse Control & Paint</title>
     <link href="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.css" rel="stylesheet">
     <script src="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.js"></script>
     <style>
         body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-            background-color: #f0f0f0;
+            font-family: roboto;
+            margin: 2em;
+            color: #3d3d3d;
+            --mdc-theme-primary: #007f8b;
+            --mdc-theme-on-primary: #f1f3f4;
+            cursor: none; /* Hide default cursor */
         }
 
         h1 {
@@ -19,172 +22,215 @@
         #container {
             display: flex;
             flex-direction: column;
-            align-items: flex-start;
+            gap: 20px;
         }
 
         #toolbar {
-            margin-bottom: 10px;
+            display: flex;
+            gap: 10px;
             padding: 10px;
-            background-color: #ddd;
-            border-radius: 5px;
-        }
-
-        #colorPicker, #brushSize, #toolToggle {
-            margin: 0 10px;
-        }
-
-        #videoPreview {
+            background: #f0f0f0;
+            border: 1px solid #ccc;
             position: relative;
-            width: 240px;
-            height: 180px;
-            border: 2px solid #007f8b;
-            margin-bottom: 10px;
+            z-index: 10;
         }
 
-        #webcam {
-            transform: rotateY(180deg);
-            -webkit-transform: rotateY(180deg);
-            -moz-transform: rotateY(180deg);
-            width: 100%;
-            height: 100%;
-        }
-
-        #gestureOverlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
+        #canvasContainer {
+            position: relative;
+            width: 800px;
+            height: 600px;
+            border: 1px solid #000;
+            z-index: 5;
         }
 
         #paintCanvas {
-            border: 2px solid #007f8b;
-            background-color: white;
-            cursor: none; /* Hide default cursor */
-        }
-
-        #gestureOutput {
-            margin-top: 10px;
-            font-size: 14px;
-            color: #333;
+            background: white;
         }
 
         #cursor {
-            position: absolute;
+            position: fixed;
             width: 10px;
             height: 10px;
-            background-color: red;
+            background: red;
             border-radius: 50%;
             pointer-events: none;
+            z-index: 1000;
+        }
+
+        #previewContainer {
+            width: 200px;
+            height: 150px;
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            border: 1px solid #000;
             z-index: 10;
+        }
+
+        #webcam {
+            width: 100%;
+            height: 100%;
+            transform: rotateY(180deg);
+            -webkit-transform: rotateY(180deg);
+            -moz-transform: rotateY(180deg);
+        }
+
+        .invisible {
+            opacity: 0.2;
+        }
+
+        button, select {
+            padding: 5px;
+            cursor: none; /* Ensure no default cursor on buttons */
         }
     </style>
 </head>
 <body>
-    <h1>Hand Gesture Paint</h1>
-    <div id="container">
-        <div id="toolbar">
-            <input type="color" id="colorPicker" value="#000000">
-            <select id="brushSize">
-                <option value="2">Small</option>
-                <option value="5" selected>Medium</option>
-                <option value="10">Large</option>
-            </select>
-            <button id="toolToggle">Brush</button>
-            <button id="clearCanvas">Clear</button>
+    <h1>Hand Gesture Mouse Control & Paint</h1>
+
+    <section id="demos" class="invisible">
+        <div id="container">
+            <button id="webcamButton" class="mdc-button mdc-button--raised">
+                <span class="mdc-button__ripple"></span>
+                <span class="mdc-button__label">ENABLE WEBCAM</span>
+            </button>
+
+            <div id="toolbar">
+                <select id="colorPicker">
+                    <option value="#000000">Black</option>
+                    <option value="#FF0000">Red</option>
+                    <option value="#00FF00">Green</option>
+                    <option value="#0000FF">Blue</option>
+                    <option value="#FFFF00">Yellow</option>
+                </select>
+                <select id="brushSize">
+                    <option value="2">Small (2px)</option>
+                    <option value="5" selected>Medium (5px)</option>
+                    <option value="10">Large (10px)</option>
+                    <option value="20">Extra Large (20px)</option>
+                </select>
+                <button id="brushTool">Brush</button>
+                <button id="eraserTool">Eraser</button>
+                <button id="clearCanvas">Clear</button>
+            </div>
+
+            <div id="canvasContainer">
+                <canvas id="paintCanvas" width="800" height="600"></canvas>
+            </div>
+
+            <div id="previewContainer">
+                <video id="webcam" autoplay playsinline></video>
+            </div>
         </div>
-        <div id="videoPreview">
-            <video id="webcam" autoplay playsinline></video>
-            <canvas id="gestureOverlay" width="240" height="180"></canvas>
-        </div>
-        <canvas id="paintCanvas" width="800" height="600"></canvas>
         <div id="cursor"></div>
-        <p id="gestureOutput"></p>
-    </div>
+    </section>
 
     <script type="module">
         import {
             GestureRecognizer,
-            FilesetResolver,
-            DrawingUtils
+            FilesetResolver
         } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
 
+        const demosSection = document.getElementById("demos");
         let gestureRecognizer;
         let runningMode = "IMAGE";
         let webcamRunning = false;
 
         const video = document.getElementById("webcam");
-        const gestureOverlay = document.getElementById("gestureOverlay");
-        const overlayCtx = gestureOverlay.getContext("2d");
-        const paintCanvas = document.getElementById("paintCanvas");
-        const paintCtx = paintCanvas.getContext("2d");
-        const gestureOutput = document.getElementById("gestureOutput");
+        const canvas = document.getElementById("paintCanvas");
+        const canvasCtx = canvas.getContext("2d");
         const cursor = document.getElementById("cursor");
-
         const colorPicker = document.getElementById("colorPicker");
         const brushSize = document.getElementById("brushSize");
-        const toolToggle = document.getElementById("toolToggle");
+        const brushTool = document.getElementById("brushTool");
+        const eraserTool = document.getElementById("eraserTool");
         const clearCanvas = document.getElementById("clearCanvas");
+        const canvasContainer = document.getElementById("canvasContainer");
 
         let isDrawing = false;
         let lastX = 0;
         let lastY = 0;
+        let currentColor = "#000000";
+        let currentSize = 5;
         let isEraser = false;
+        let isBrushActive = false;
 
-        async function createGestureRecognizer() {
-            try {
-                const vision = await FilesetResolver.forVisionTasks(
-                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
-                );
-                gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
-                    baseOptions: {
-                        modelAssetPath:
-                            "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
-                        delegate: "GPU"
-                    },
-                    runningMode: runningMode,
-                    numHands: 1
-                });
-                console.log("Gesture Recognizer loaded");
-                startWebcam();
-            } catch (error) {
-                console.error("Failed to load Gesture Recognizer:", error);
-                alert("Error loading gesture recognition. Check console.");
-            }
-        }
+        const createGestureRecognizer = async () => {
+            const vision = await FilesetResolver.forVisionTasks(
+                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+            );
+            gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
+                baseOptions: {
+                    modelAssetPath:
+                        "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
+                    delegate: "GPU"
+                },
+                runningMode: runningMode,
+                numHands: 2
+            });
+            demosSection.classList.remove("invisible");
+        };
         createGestureRecognizer();
 
-        function startWebcam() {
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                alert("Webcam not supported");
-                return;
-            }
+        // Toolbar event listeners
+        colorPicker.addEventListener("change", (e) => {
+            currentColor = e.target.value;
+            isEraser = false;
+        });
 
-            navigator.mediaDevices.getUserMedia({ video: true })
-                .then(stream => {
-                    video.srcObject = stream;
-                    video.addEventListener("loadeddata", predictWebcam);
-                    webcamRunning = true;
-                })
-                .catch(error => {
-                    console.error("Webcam error:", error);
-                    alert("Failed to start webcam");
-                });
-        }
+        brushSize.addEventListener("change", (e) => {
+            currentSize = parseInt(e.target.value);
+        });
 
-        toolToggle.addEventListener("click", () => {
-            isEraser = !isEraser;
-            toolToggle.textContent = isEraser ? "Eraser" : "Brush";
+        brushTool.addEventListener("click", () => {
+            isBrushActive = true;
+            isEraser = false;
+        });
+
+        eraserTool.addEventListener("click", () => {
+            isBrushActive = true;
+            isEraser = true;
         });
 
         clearCanvas.addEventListener("click", () => {
-            paintCtx.clearRect(0, 0, paintCanvas.width, paintCanvas.height);
+            canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
         });
+
+        function hasGetUserMedia() {
+            return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+        }
+
+        if (hasGetUserMedia()) {
+            const webcamButton = document.getElementById("webcamButton");
+            webcamButton.addEventListener("click", enableCam);
+        } else {
+            console.warn("getUserMedia() is not supported by your browser");
+        }
+
+        function enableCam(event) {
+            if (!gestureRecognizer) {
+                alert("Please wait for gestureRecognizer to load");
+                return;
+            }
+
+            webcamRunning = !webcamRunning;
+            const button = event.target.querySelector(".mdc-button__label");
+            button.innerText = webcamRunning ? "DISABLE WEBCAM" : "ENABLE WEBCAM";
+
+            if (webcamRunning) {
+                const constraints = { video: true };
+                navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
+                    video.srcObject = stream;
+                    video.addEventListener("loadeddata", predictWebcam);
+                });
+            } else {
+                video.srcObject.getTracks().forEach(track => track.stop());
+                cursor.style.display = "none";
+            }
+        }
 
         let lastVideoTime = -1;
         async function predictWebcam() {
-            if (!webcamRunning) return;
-
             if (runningMode === "IMAGE") {
                 runningMode = "VIDEO";
                 await gestureRecognizer.setOptions({ runningMode: "VIDEO" });
@@ -195,73 +241,77 @@
                 lastVideoTime = video.currentTime;
                 const results = gestureRecognizer.recognizeForVideo(video, nowInMs);
 
-                overlayCtx.clearRect(0, 0, gestureOverlay.width, gestureOverlay.height);
-                const drawingUtils = new DrawingUtils(overlayCtx);
-
-                if (results && results.landmarks && results.landmarks.length > 0) {
-                    const landmarks = results.landmarks[0];
-                    drawingUtils.drawLandmarks(landmarks, { color: "#FF0000", lineWidth: 2 });
-
-                    const indexFinger = landmarks[8]; // Index finger tip
-                    const middleFinger = landmarks[12]; // Middle finger tip
-
-                    // Map to paint canvas coordinates
-                    const canvasX = (indexFinger.x * paintCanvas.width);
-                    const canvasY = (indexFinger.y * paintCanvas.height);
+                if (results.landmarks && results.landmarks.length > 0) {
+                    // Index finger tip (landmark 8) controls cursor across entire page
+                    const indexFingerTip = results.landmarks[0][8];
+                    const screenX = (1 - indexFingerTip.x) * window.innerWidth; // Mirror x
+                    const screenY = indexFingerTip.y * window.innerHeight;
 
                     // Update cursor position
-                    const canvasRect = paintCanvas.getBoundingClientRect();
-                    cursor.style.left = (canvasRect.left + canvasX - 5) + "px";
-                    cursor.style.top = (canvasRect.top + canvasY - 5) + "px";
+                    cursor.style.display = "block";
+                    cursor.style.left = `${screenX - 5}px`;
+                    cursor.style.top = `${screenY - 5}px`;
 
-                    let gestureText = "";
-                    if (results.gestures.length > 0) {
-                        const gesture = results.gestures[0][0].categoryName;
-                        const score = parseFloat(results.gestures[0][0].score * 100).toFixed(2);
-                        gestureText = `Gesture: ${gesture} (${score}%)`;
+                    // Detect gestures
+                    const gestures = results.gestures[0];
+                    const gestureName = gestures && gestures[0] ? gestures[0].categoryName : "";
+                    const hasMiddleFingerExtended = results.landmarks[0][12].z < results.landmarks[0][9].z;
 
-                        // Check for click (index and middle fingers close together)
-                        const fingerDistance = Math.sqrt(
-                            Math.pow(indexFinger.x - middleFinger.x, 2) +
-                            Math.pow(indexFinger.y - middleFinger.y, 2)
-                        );
+                    // Convert screen coordinates to canvas coordinates
+                    const canvasRect = canvas.getBoundingClientRect();
+                    const canvasX = screenX - canvasRect.left;
+                    const canvasY = screenY - canvasRect.top;
 
-                        const isClicking = fingerDistance < 0.05; // Adjust threshold as needed
+                    // Check if cursor is over canvas
+                    const isOverCanvas = canvasX >= 0 && canvasX <= canvas.width && 
+                                      canvasY >= 0 && canvasY <= canvas.height;
 
-                        if (isClicking) {
-                            if (!isDrawing) {
-                                isDrawing = true;
+                    if (gestureName === "Pointing_Up" || gestureName === "Pointing") {
+                        if (hasMiddleFingerExtended) { // Index + Middle = Click/Paint
+                            simulateClick(screenX, screenY);
+                            if (isOverCanvas && isBrushActive) {
+                                if (!isDrawing) {
+                                    isDrawing = true;
+                                    lastX = canvasX;
+                                    lastY = canvasY;
+                                }
+                                
+                                canvasCtx.beginPath();
+                                canvasCtx.moveTo(lastX, lastY);
+                                canvasCtx.lineTo(canvasX, canvasY);
+                                canvasCtx.strokeStyle = isEraser ? "#FFFFFF" : currentColor;
+                                canvasCtx.lineWidth = isEraser ? currentSize * 2 : currentSize;
+                                canvasCtx.lineCap = "round";
+                                canvasCtx.stroke();
+
                                 lastX = canvasX;
                                 lastY = canvasY;
                             }
-                        } else if (isDrawing) {
+                        } else { // Only index = Move cursor
                             isDrawing = false;
                         }
-
-                        if (isDrawing) {
-                            paintCtx.beginPath();
-                            paintCtx.moveTo(lastX, lastY);
-                            paintCtx.lineTo(canvasX, canvasY);
-                            paintCtx.strokeStyle = isEraser ? "#FFFFFF" : colorPicker.value;
-                            paintCtx.lineWidth = parseInt(brushSize.value);
-                            paintCtx.lineCap = "round";
-                            paintCtx.stroke();
-                            lastX = canvasX;
-                            lastY = canvasY;
-                        }
                     } else {
-                        gestureText = "No gesture detected";
                         isDrawing = false;
                     }
-
-                    gestureOutput.textContent = gestureText + (isDrawing ? " - Drawing" : "");
-                } else {
-                    gestureOutput.textContent = "No hand detected";
-                    cursor.style.display = "none";
                 }
             }
 
-            window.requestAnimationFrame(predictWebcam);
+            if (webcamRunning) {
+                window.requestAnimationFrame(predictWebcam);
+            }
+        }
+
+        function simulateClick(x, y) {
+            const elements = [colorPicker, brushSize, brushTool, eraserTool, clearCanvas];
+            elements.forEach(element => {
+                const rect = element.getBoundingClientRect();
+                if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+                    element.click();
+                    if (element === colorPicker || element === brushSize) {
+                        element.focus();
+                    }
+                }
+            });
         }
     </script>
 </body>
