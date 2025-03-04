@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Real-Time Hand Gesture Detection</title>
+    <title>Hand Gesture Detection with Animated Lines</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -113,6 +113,7 @@
         let stream = null;
         let hands = null;
         let animationFrameId = null;
+        let animationTime = 0; // For pulsing effect
 
         function updateResult(text, className = '') {
             resultDiv.textContent = text;
@@ -132,8 +133,8 @@
                     locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`
                 });
                 hands.setOptions({
-                    maxNumHands: 2, // Detect up to 2 hands
-                    modelComplexity: 1, // 0 (faster) or 1 (more accurate)
+                    maxNumHands: 2,
+                    modelComplexity: 1,
                     minDetectionConfidence: 0.5,
                     minTrackingConfidence: 0.5
                 });
@@ -163,29 +164,58 @@
             const fingerTips = [4, 8, 12, 16, 20]; // Thumb, Index, Middle, Ring, Pinky
             const fingerBases = [2, 5, 9, 13, 17]; // Base of each finger
             let raisedFingers = 0;
+            const raisedIndices = [];
 
-            // Check each finger (simplified: tip above base = raised)
             fingerTips.forEach((tipIdx, i) => {
                 const tip = landmarks[tipIdx];
                 const base = landmarks[fingerBases[i]];
-                if (tip.y < base.y) { // Tip is above base in y-coordinate (screen top is 0)
+                if (tip.y < base.y) { // Tip above base = raised
                     raisedFingers++;
+                    raisedIndices.push(i);
                 }
             });
 
-            return raisedFingers;
+            return { count: raisedFingers, indices: raisedIndices };
         }
 
-        function drawLandmarks(results) {
+        function drawAnimatedLandmarks(results) {
             const ctx = overlay.getContext('2d');
             overlay.width = video.videoWidth;
             overlay.height = video.videoHeight;
             ctx.clearRect(0, 0, overlay.width, overlay.height);
 
+            animationTime += 0.1; // Increment for animation
+            const pulse = Math.sin(animationTime) * 0.5 + 0.5; // Pulsing effect (0 to 1)
+
             if (results.multiHandLandmarks) {
                 for (const landmarks of results.multiHandLandmarks) {
-                    // Draw connections
+                    const { indices: raisedIndices } = countFingers(landmarks);
+
+                    // Draw all connections in default color
                     drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 2 });
+
+                    // Animate raised finger connections
+                    const fingerConnections = [
+                        [[2, 4]],   // Thumb
+                        [[5, 8]],   // Index
+                        [[9, 12]],  // Middle
+                        [[13, 16]], // Ring
+                        [[17, 20]]  // Pinky
+                    ];
+                    raisedIndices.forEach(fingerIdx => {
+                        const connection = fingerConnections[fingerIdx];
+                        connection.forEach(([startIdx, endIdx]) => {
+                            const start = landmarks[startIdx];
+                            const end = landmarks[endIdx];
+                            ctx.beginPath();
+                            ctx.moveTo(start.x * overlay.width, start.y * overlay.height);
+                            ctx.lineTo(end.x * overlay.width, end.y * overlay.height);
+                            ctx.lineWidth = 3 + pulse; // Pulsing width
+                            ctx.strokeStyle = `rgba(255, 0, 0, ${0.5 + pulse * 0.5})`; // Pulsing red
+                            ctx.stroke();
+                        });
+                    });
+
                     // Draw landmarks
                     drawLandmarks(ctx, landmarks, { color: '#FF0000', lineWidth: 1, radius: 4 });
                 }
@@ -193,15 +223,15 @@
         }
 
         function onResults(results) {
-            drawLandmarks(results);
+            drawAnimatedLandmarks(results);
             let totalFingers = 0;
             let handsDetected = 0;
 
             if (results.multiHandLandmarks) {
                 handsDetected = results.multiHandLandmarks.length;
                 for (const landmarks of results.multiHandLandmarks) {
-                    const fingers = countFingers(landmarks);
-                    totalFingers += fingers;
+                    const { count } = countFingers(landmarks);
+                    totalFingers += count;
                 }
                 updateResult(`Detected ${handsDetected} hand${handsDetected > 1 ? 's' : ''} with ${totalFingers} finger${totalFingers > 1 ? 's' : ''} raised`, 'success');
             } else {
@@ -232,6 +262,7 @@
                 if (hands && stream) {
                     isDetecting = true;
                     toggleButtons();
+                    animationTime = 0; // Reset animation
                     detectHands();
                 } else {
                     toggleButtons();
@@ -262,7 +293,6 @@
             }
         });
 
-        // Initial camera check
         navigator.mediaDevices.getUserMedia({ video: true })
             .then((testStream) => {
                 console.log('Camera access granted');
