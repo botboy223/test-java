@@ -71,8 +71,10 @@
             margin: 0;
         }
 
-        .output_canvas {
-            /* Removed flip transformation since cursor will be mapped correctly */
+        #drawingCanvas {
+            border: 1px solid #000;
+            clear: both;
+            display: block;
         }
 
         .detectOnClick img {
@@ -84,7 +86,6 @@
             font-size: calc(8px + 1.2vw);
         }
 
-        /* Added styles for toolbar and canvas */
         #toolbar {
             margin: 10px 0;
             padding: 10px;
@@ -118,9 +119,8 @@
 
     <section id="demos" class="invisible">
         <h2>Demo: Hand Gesture Drawing</h2>
-        <p>Use your index finger to move the cursor on the canvas. Bring index and middle fingers together to draw.</p>
+        <p>Use your index finger to move the cursor on the canvas below. Bring index and middle fingers together to draw.</p>
 
-        <!-- Added toolbar for MS Paint features -->
         <div id="toolbar">
             <button id="brushTool" class="tool-btn selected">Brush</button>
             <button id="eraserTool" class="tool-btn">Eraser</button>
@@ -141,17 +141,18 @@
             </button>
             <div style="position: relative;">
                 <video id="webcam" autoplay playsinline></video>
-                <canvas class="output_canvas" id="output_canvas" width="1280" height="720" style="position: absolute; left: 0px; top: 0px;"></canvas>
                 <p id='gesture_output' class="output"></p>
             </div>
-        </div> 
+        </div>
+
+        <!-- Separate drawing canvas -->
+        <canvas id="drawingCanvas" width="1280" height="720"></canvas>
     </section>
 
     <script type="module">
         import {
             GestureRecognizer,
-            FilesetResolver,
-            DrawingUtils
+            FilesetResolver
         } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
 
         const demosSection = document.getElementById("demos");
@@ -159,7 +160,7 @@
         let runningMode = "IMAGE";
         let enableWebcamButton;
         let webcamRunning = false;
-        const videoHeight = "360px";
+        const videoHeight = "280px";
         const videoWidth = "480px";
 
         // Drawing variables
@@ -189,7 +190,7 @@
         createGestureRecognizer();
 
         const video = document.getElementById("webcam");
-        const canvasElement = document.getElementById("output_canvas");
+        const canvasElement = document.getElementById("drawingCanvas");
         const canvasCtx = canvasElement.getContext("2d");
         const gestureOutput = document.getElementById("gesture_output");
 
@@ -218,10 +219,7 @@
                 enableWebcamButton.innerText = "DISABLE WEBCAM";
             }
 
-            const constraints = {
-                video: true
-            };
-
+            const constraints = { video: true };
             navigator.mediaDevices.getUserMedia(constraints).then(function (stream) {
                 video.srcObject = stream;
                 video.addEventListener("loadeddata", predictWebcam);
@@ -261,10 +259,6 @@
 
         let lastVideoTime = -1;
         let results = undefined;
-        let persistentCanvas = document.createElement("canvas");
-        persistentCanvas.width = 1280;
-        persistentCanvas.height = 720;
-        let persistentCtx = persistentCanvas.getContext("2d");
 
         async function predictWebcam() {
             const webcamElement = document.getElementById("webcam");
@@ -280,24 +274,16 @@
                 results = gestureRecognizer.recognizeForVideo(video, nowInMs);
             }
 
-            canvasCtx.save();
+            // Clear the canvas for fresh cursor drawing
             canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-
-            canvasElement.style.height = videoHeight;
-            webcamElement.style.height = videoHeight;
-            canvasElement.style.width = videoWidth;
-            webcamElement.style.width = videoWidth;
-
-            // Draw persistent drawings first
-            canvasCtx.drawImage(persistentCanvas, 0, 0);
 
             if (results.landmarks && results.landmarks.length > 0) {
                 const landmarks = results.landmarks[0];
                 const indexFingerTip = landmarks[8]; // Index finger tip
                 const middleFingerTip = landmarks[12]; // Middle finger tip
 
-                // Map video coordinates to canvas coordinates (accounting for video flip)
-                cursorX = (1 - indexFingerTip.x) * canvasElement.width; // Flip x-coordinate
+                // Map video coordinates to canvas coordinates, adjusting for flip
+                cursorX = (1 - indexFingerTip.x) * canvasElement.width; // Flip x due to rotateY(180deg)
                 cursorY = indexFingerTip.y * canvasElement.height;
 
                 // Detect click (index + middle finger close together)
@@ -305,9 +291,9 @@
                     Math.pow(indexFingerTip.x - middleFingerTip.x, 2) +
                     Math.pow(indexFingerTip.y - middleFingerTip.y, 2)
                 );
-                const isClicking = distance < 0.1; // Threshold for click detection
+                const isClicking = distance < 0.1;
 
-                // Drawing logic on persistent canvas
+                // Drawing logic on the canvas
                 if (isClicking) {
                     if (!isDrawing) {
                         isDrawing = true;
@@ -315,12 +301,12 @@
                         lastY = cursorY;
                     }
 
-                    persistentCtx.beginPath();
-                    persistentCtx.moveTo(lastX, lastY);
-                    persistentCtx.lineTo(cursorX, cursorY);
-                    persistentCtx.strokeStyle = currentTool === "brush" ? currentColor : "#FFFFFF";
-                    persistentCtx.lineWidth = 5;
-                    persistentCtx.stroke();
+                    canvasCtx.beginPath();
+                    canvasCtx.moveTo(lastX, lastY);
+                    canvasCtx.lineTo(cursorX, cursorY);
+                    canvasCtx.strokeStyle = currentTool === "brush" ? currentColor : "#FFFFFF";
+                    canvasCtx.lineWidth = 5;
+                    canvasCtx.stroke();
 
                     lastX = cursorX;
                     lastY = cursorY;
@@ -328,10 +314,7 @@
                     isDrawing = false;
                 }
 
-                // Update main canvas with persistent drawing
-                canvasCtx.drawImage(persistentCanvas, 0, 0);
-
-                // Draw cursor on canvas only
+                // Draw cursor on the canvas
                 canvasCtx.beginPath();
                 canvasCtx.arc(cursorX, cursorY, 5, 0, 2 * Math.PI);
                 canvasCtx.fillStyle = "rgba(0, 127, 139, 0.5)";
@@ -349,8 +332,6 @@
                     gestureOutput.style.display = "none";
                 }
             }
-
-            canvasCtx.restore();
 
             if (webcamRunning === true) {
                 window.requestAnimationFrame(predictWebcam);
