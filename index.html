@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Enhanced Online Barcode Scanner</title>
+    <title>Fast Barcode Scanner with Multi-Shot Confirmation</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -71,6 +71,11 @@
             font-weight: bold;
         }
         
+        .tentative {
+            color: #FFA500;
+            font-weight: bold;
+        }
+        
         .error {
             color: #f44336;
             font-weight: bold;
@@ -99,11 +104,13 @@
         const stopBtn = document.getElementById('stop-btn');
         const resultDiv = document.getElementById('result');
         let isScanning = false;
+        const detectionBuffer = new Map(); // Store barcode detections
+        const requiredShots = 3; // Number of consistent detections needed
 
         function updateResult(text, className = '') {
             resultDiv.textContent = text;
             resultDiv.className = className;
-            console.log(`Result: ${text}`); // Debug log
+            console.log(`Result: ${text}`);
         }
 
         function toggleButtons() {
@@ -119,9 +126,9 @@
                 constraints: {
                     width: { ideal: 640 },
                     height: { ideal: 480 },
-                    facingMode: "environment" // Rear camera
+                    facingMode: "environment"
                 },
-                area: { // Expanded scanning area
+                area: {
                     top: "10%",
                     right: "10%",
                     left: "10%",
@@ -129,12 +136,12 @@
                 }
             },
             locator: {
-                patchSize: "medium", // Adjust to "small" or "large" if needed
-                halfSample: false // Disabled for better accuracy
+                patchSize: "small", // Faster processing
+                halfSample: true // Reduce resolution for speed
             },
-            numOfWorkers: 0, // Set to 0 for simplicity, increase if performance allows
+            numOfWorkers: navigator.hardwareConcurrency || 4, // Use available cores
             decoder: {
-                readers: [ // Common barcode formats
+                readers: [
                     "code_128_reader",
                     "ean_reader",
                     "ean_8_reader",
@@ -146,9 +153,21 @@
                 ],
                 multiple: false
             },
-            locate: true, // Enable locator
-            frequency: 10 // Faster frame processing
+            locate: true,
+            frequency: 20 // Higher frequency for faster scanning
         };
+
+        function checkConfirmation(code, format) {
+            const key = `${code}-${format}`;
+            const count = (detectionBuffer.get(key) || 0) + 1;
+            detectionBuffer.set(key, count);
+
+            if (count >= requiredShots) {
+                detectionBuffer.clear(); // Reset buffer after confirmation
+                return true;
+            }
+            return false;
+        }
 
         startBtn.addEventListener('click', () => {
             if (!isScanning) {
@@ -168,6 +187,7 @@
                     Quagga.start();
                     isScanning = true;
                     toggleButtons();
+                    detectionBuffer.clear();
                     updateResult('Scanning...');
                 });
             }
@@ -178,6 +198,7 @@
                 Quagga.stop();
                 isScanning = false;
                 toggleButtons();
+                detectionBuffer.clear();
                 updateResult('Scanner stopped. Click Start to begin again.');
             }
         });
@@ -185,12 +206,18 @@
         Quagga.onDetected((result) => {
             const code = result.codeResult.code;
             const format = result.codeResult.format;
-            updateResult(`Scanned: ${code} (${format})`, 'success');
-            console.log('Barcode detected:', result.codeResult);
-            // Uncomment to stop after detection:
-            // Quagga.stop();
-            // isScanning = false;
-            // toggleButtons();
+
+            if (checkConfirmation(code, format)) {
+                updateResult(`Confirmed: ${code} (${format})`, 'success');
+                console.log('Barcode confirmed:', result.codeResult);
+                // Uncomment to stop after confirmation:
+                // Quagga.stop();
+                // isScanning = false;
+                // toggleButtons();
+            } else {
+                updateResult(`Detected: ${code} (${format}) [${detectionBuffer.get(`${code}-${format}`)}/${requiredShots}]`, 'tentative');
+                console.log('Barcode tentative detection:', result.codeResult);
+            }
         });
 
         Quagga.onProcessed((result) => {
@@ -212,19 +239,20 @@
                     });
                 }
                 if (result.codeResult && result.codeResult.code) {
+                    const key = `${result.codeResult.code}-${result.codeResult.format}`;
+                    const isConfirmed = detectionBuffer.get(key) >= requiredShots;
                     Quagga.ImageDebug.drawPath(result.line, {x: "x", y: "y"}, drawingCtx, {
-                        color: "#FF0000",
+                        color: isConfirmed ? "#00FF00" : "#FFA500",
                         lineWidth: 3
                     });
                 }
             }
         });
 
-        // Check camera availability
         navigator.mediaDevices.getUserMedia({ video: true })
             .then((stream) => {
                 console.log('Camera access granted');
-                stream.getTracks().forEach(track => track.stop()); // Stop stream after checking
+                stream.getTracks().forEach(track => track.stop());
             })
             .catch(err => {
                 updateResult('Camera access denied. Please allow camera permissions and ensure a camera is available.', 'error');
