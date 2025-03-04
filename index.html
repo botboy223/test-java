@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Fast Barcode Scanner with Multi-Shot Confirmation</title>
+    <title>Real-Time Face Detection</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -10,7 +10,7 @@
             background-color: #f0f0f0;
         }
         
-        #scanner-container {
+        #video-container {
             width: 640px;
             height: 480px;
             margin: 0 auto;
@@ -21,10 +21,18 @@
             background-color: #000;
         }
         
-        #scanner-video {
+        #video {
             width: 100%;
             height: 100%;
             object-fit: cover;
+        }
+        
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
         }
         
         #controls {
@@ -71,11 +79,6 @@
             font-weight: bold;
         }
         
-        .tentative {
-            color: #FFA500;
-            font-weight: bold;
-        }
-        
         .error {
             color: #f44336;
             font-weight: bold;
@@ -83,29 +86,34 @@
     </style>
 </head>
 <body>
-    <div id="scanner-container">
-        <video id="scanner-video"></video>
+    <div id="video-container">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="overlay"></canvas>
     </div>
     
     <div id="controls">
-        <button id="start-btn">Start Scanner</button>
-        <button id="stop-btn" disabled>Stop Scanner</button>
+        <button id="start-btn">Start Detection</button>
+        <button id="stop-btn" disabled>Stop Detection</button>
     </div>
     
     <div id="result-container">
-        <div id="result">Ready to scan...</div>
+        <div id="result">Ready to detect faces...</div>
     </div>
 
-    <!-- Load QuaggaJS from CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
+    <!-- Load face-api.js from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-detection@1.0.1/dist/face-detection.min.js"></script>
     
     <script>
         const startBtn = document.getElementById('start-btn');
         const stopBtn = document.getElementById('stop-btn');
+        const video = document.getElementById('video');
+        const overlay = document.getElementById('overlay');
         const resultDiv = document.getElementById('result');
-        let isScanning = false;
-        const detectionBuffer = new Map(); // Store barcode detections
-        const requiredShots = 3; // Number of consistent detections needed
+        let isDetecting = false;
+        let stream = null;
+        let detector = null;
+        let animationFrameId = null;
 
         function updateResult(text, className = '') {
             resultDiv.textContent = text;
@@ -114,165 +122,126 @@
         }
 
         function toggleButtons() {
-            startBtn.disabled = isScanning;
-            stopBtn.disabled = !isScanning;
+            startBtn.disabled = isDetecting;
+            stopBtn.disabled = !isDetecting;
         }
 
-        const config = {
-            inputStream: {
-                name: "Live",
-                type: "LiveStream",
-                target: document.querySelector('#scanner-container'),
-                constraints: {
-                    width: { ideal: 640 },
-                    height: { ideal: 480 },
-                    facingMode: "environment"
-                },
-                area: {
-                    top: "10%",
-                    right: "10%",
-                    left: "10%",
-                    bottom: "10%"
-                }
-            },
-            locator: {
-                patchSize: "small", // Faster processing
-                halfSample: true // Reduce resolution for speed
-            },
-            numOfWorkers: navigator.hardwareConcurrency || 4, // Use available cores
-            decoder: {
-                readers: [
-                    "code_128_reader",
-                    "ean_reader",
-                    "ean_8_reader",
-                    "code_39_reader",
-                    "codabar_reader",
-                    "upc_reader",
-                    "upc_e_reader",
-                    "i2of5_reader"
-                ],
-                multiple: false
-            },
-            locate: true,
-            frequency: 20 // Higher frequency for faster scanning
-        };
-
-        function checkConfirmation(code, format) {
-            const key = `${code}-${format}`;
-            const count = (detectionBuffer.get(key) || 0) + 1;
-            detectionBuffer.set(key, count);
-
-            if (count >= requiredShots) {
-                detectionBuffer.clear(); // Reset buffer after confirmation
-                return true;
-            }
-            return false;
-        }
-
-        startBtn.addEventListener('click', () => {
-            if (!isScanning) {
-                if (typeof Quagga === 'undefined') {
-                    updateResult('Error: QuaggaJS library not loaded. Check your internet connection.', 'error');
-                    return;
-                }
-
-                console.log('Initializing Quagga with config:', config);
-                Quagga.init(config, (err) => {
-                    if (err) {
-                        updateResult(`Initialization Error: ${err.message}`, 'error');
-                        console.error('Quagga init error:', err);
-                        return;
-                    }
-                    console.log('Quagga initialized successfully');
-                    Quagga.start();
-                    isScanning = true;
-                    toggleButtons();
-                    detectionBuffer.clear();
-                    updateResult('Scanning...');
+        async function loadModel() {
+            try {
+                console.log('Loading face detection model...');
+                detector = await faceDetection.createDetector(faceDetection.SupportedModels.MediaPipeFaceDetector, {
+                    runtime: 'tfjs', // Use TensorFlow.js backend
+                    maxFaces: 10 // Maximum number of faces to detect
                 });
+                console.log('Model loaded successfully');
+            } catch (err) {
+                updateResult(`Model Loading Error: ${err.message}`, 'error');
+                console.error('Model loading error:', err);
+            }
+        }
+
+        async function startVideo() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'environment' }
+                });
+                video.srcObject = stream;
+                await video.play();
+                console.log('Video stream started');
+            } catch (err) {
+                updateResult(`Camera Error: ${err.message}`, 'error');
+                console.error('Camera error:', err);
+            }
+        }
+
+        function drawDetections(detections) {
+            const ctx = overlay.getContext('2d');
+            overlay.width = video.videoWidth;
+            overlay.height = video.videoHeight;
+            ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+            detections.forEach(detection => {
+                const { x, y, width, height } = detection.box;
+                ctx.beginPath();
+                ctx.rect(x, y, width, height);
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = '#00FF00';
+                ctx.stroke();
+            });
+        }
+
+        async function detectFaces() {
+            if (!detector || !video.readyState === 4) return; // Ensure video and model are ready
+
+            const detections = await detector.estimateFaces(video);
+            drawDetections(detections);
+
+            if (detections.length > 0) {
+                updateResult(`Detected ${detections.length} face${detections.length > 1 ? 's' : ''}`, 'success');
+            } else {
+                updateResult('Scanning for faces...', '');
+            }
+
+            if (isDetecting) {
+                animationFrameId = requestAnimationFrame(detectFaces); // Continue detection
+            }
+        }
+
+        startBtn.addEventListener('click', async () => {
+            if (!isDetecting) {
+                updateResult('Initializing...', '');
+                toggleButtons();
+
+                if (!detector) {
+                    await loadModel();
+                }
+                if (!stream) {
+                    await startVideo();
+                }
+
+                if (detector && stream) {
+                    isDetecting = true;
+                    toggleButtons();
+                    detectFaces();
+                } else {
+                    toggleButtons();
+                }
             }
         });
 
         stopBtn.addEventListener('click', () => {
-            if (isScanning) {
-                Quagga.stop();
-                isScanning = false;
+            if (isDetecting) {
+                isDetecting = false;
+                if (animationFrameId) {
+                    cancelAnimationFrame(animationFrameId);
+                }
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                    stream = null;
+                }
+                video.srcObject = null;
+                overlay.getContext('2d').clearRect(0, 0, overlay.width, overlay.height);
                 toggleButtons();
-                detectionBuffer.clear();
-                updateResult('Scanner stopped. Click Start to begin again.');
+                updateResult('Detection stopped. Click Start to begin again.');
             }
         });
-
-        Quagga.onDetected((result) => {
-            const code = result.codeResult.code;
-            const format = result.codeResult.format;
-
-            if (checkConfirmation(code, format)) {
-                updateResult(`Confirmed: ${code} (${format})`, 'success');
-                console.log('Barcode confirmed:', result.codeResult);
-                // Uncomment to stop after confirmation:
-                // Quagga.stop();
-                // isScanning = false;
-                // toggleButtons();
-            } else {
-                updateResult(`Detected: ${code} (${format}) [${detectionBuffer.get(`${code}-${format}`)}/${requiredShots}]`, 'tentative');
-                console.log('Barcode tentative detection:', result.codeResult);
-            }
-        });
-
-        Quagga.onProcessed((result) => {
-            const drawingCtx = Quagga.canvas.ctx.overlay;
-            const drawingCanvas = Quagga.canvas.dom.overlay;
-
-            if (!drawingCtx || !drawingCanvas) {
-                console.warn('Overlay canvas not initialized yet');
-                return;
-            }
-
-            drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
-
-            if (result) {
-                if (result.box) {
-                    Quagga.ImageDebug.drawPath(result.box, {x: 0, y: 1}, drawingCtx, {
-                        color: "#00FF00",
-                        lineWidth: 2
-                    });
-                }
-                if (result.codeResult && result.codeResult.code) {
-                    const key = `${result.codeResult.code}-${result.codeResult.format}`;
-                    const isConfirmed = detectionBuffer.get(key) >= requiredShots;
-                    Quagga.ImageDebug.drawPath(result.line, {x: "x", y: "y"}, drawingCtx, {
-                        color: isConfirmed ? "#00FF00" : "#FFA500",
-                        lineWidth: 3
-                    });
-                }
-            }
-        });
-
-        navigator.mediaDevices.getUserMedia({ video: true })
-            .then((stream) => {
-                console.log('Camera access granted');
-                stream.getTracks().forEach(track => track.stop());
-            })
-            .catch(err => {
-                updateResult('Camera access denied. Please allow camera permissions and ensure a camera is available.', 'error');
-                console.error('Camera error:', err);
-            });
 
         window.addEventListener('beforeunload', () => {
-            if (isScanning) {
-                Quagga.stop();
+            if (isDetecting) {
+                stopBtn.click();
             }
         });
 
-        window.addEventListener('resize', () => {
-            if (isScanning) {
-                Quagga.stop();
-                Quagga.init(config, (err) => {
-                    if (!err) Quagga.start();
-                });
-            }
-        });
+        // Initial camera check
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then((testStream) => {
+                console.log('Camera access granted');
+                testStream.getTracks().forEach(track => track.stop());
+            })
+            .catch(err => {
+                updateResult('Camera access denied. Please allow camera permissions.', 'error');
+                console.error('Camera error:', err);
+            });
     </script>
 </body>
 </html>
