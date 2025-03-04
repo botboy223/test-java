@@ -3,81 +3,88 @@
 <head>
     <meta charset="UTF-8">
     <title>Hand Gesture Paint</title>
+    <link href="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/hand-pose-detection"></script>
     <style>
-        body { font-family: Arial, sans-serif; text-align: center; }
-        video { display: block; margin: auto; transform: scaleX(-1); }
-        canvas { border: 2px solid black; display: block; margin: auto; }
-        .toolbar { margin-top: 10px; }
-        button { margin: 5px; padding: 10px; font-size: 16px; }
+        body {
+            font-family: Roboto, sans-serif;
+            margin: 0;
+            background-color: #222;
+            color: white;
+            text-align: center;
+        }
+        video {
+            display: none;
+        }
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: black;
+        }
     </style>
 </head>
 <body>
     <h1>Hand Gesture Paint</h1>
-    <video id="webcam" autoplay playsinline width="320" height="240"></video>
-    <canvas id="canvas" width="800" height="500"></canvas>
-    <div class="toolbar">
-        <button onclick="setTool('draw')">Brush</button>
-        <button onclick="setTool('eraser')">Eraser</button>
-        <button onclick="clearCanvas()">Clear</button>
-        <input type="color" id="colorPicker" onchange="setColor(this.value)">
-        <input type="range" min="1" max="20" value="5" id="brushSize" onchange="setBrushSize(this.value)">
-    </div>
-    
+    <video id="webcam" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
     <script>
         const video = document.getElementById("webcam");
         const canvas = document.getElementById("canvas");
         const ctx = canvas.getContext("2d");
-        let tool = "draw";
-        let brushColor = "black";
-        let brushSize = 5;
+        let mouseX = 0, mouseY = 0;
         let isDrawing = false;
-        let lastX = 0, lastY = 0;
-        
-        function setTool(selectedTool) { tool = selectedTool; }
-        function setColor(color) { brushColor = color; }
-        function setBrushSize(size) { brushSize = size; }
-        function clearCanvas() { ctx.clearRect(0, 0, canvas.width, canvas.height); }
         
         async function setupCamera() {
             const stream = await navigator.mediaDevices.getUserMedia({ video: true });
             video.srcObject = stream;
+            return new Promise(resolve => {
+                video.onloadedmetadata = () => resolve(video);
+            });
         }
-        setupCamera();
         
-        async function detectHands() {
-            const model = await handPoseDetection.createDetector(handPoseDetection.SupportedModels.MediaPipeHands, { runtime: 'tfjs' });
-            setInterval(async () => {
-                const hands = await model.estimateHands(video, { flipHorizontal: true });
-                if (hands.length > 0) {
-                    const indexFinger = hands[0].keypoints[8];
-                    const middleFinger = hands[0].keypoints[12];
-                    
-                    let x = indexFinger.x * (canvas.width / video.width);
-                    let y = indexFinger.y * (canvas.height / video.height);
-                    
+        async function main() {
+            await setupCamera();
+            video.play();
+            const hands = new Hands({locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+            hands.setOptions({
+                maxNumHands: 1,
+                minDetectionConfidence: 0.7,
+                minTrackingConfidence: 0.7
+            });
+            hands.onResults(results => {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                if (results.multiHandLandmarks.length > 0) {
+                    const indexFinger = results.multiHandLandmarks[0][8];
+                    mouseX = indexFinger.x * canvas.width;
+                    mouseY = indexFinger.y * canvas.height;
+                    ctx.fillStyle = "red";
+                    ctx.beginPath();
+                    ctx.arc(mouseX, mouseY, 5, 0, 2 * Math.PI);
+                    ctx.fill();
                     if (isDrawing) {
-                        ctx.beginPath();
-                        ctx.moveTo(lastX, lastY);
-                        ctx.lineTo(x, y);
-                        ctx.strokeStyle = tool === "eraser" ? "white" : brushColor;
-                        ctx.lineWidth = brushSize;
+                        ctx.strokeStyle = "white";
+                        ctx.lineWidth = 3;
+                        ctx.lineTo(mouseX, mouseY);
                         ctx.stroke();
                     }
-                    lastX = x;
-                    lastY = y;
-                    
-                    // Check for pinch (click) gesture
-                    let distance = Math.hypot(indexFinger.x - middleFinger.x, indexFinger.y - middleFinger.y);
-                    isDrawing = distance < 30;
                 }
-            }, 50);
+            });
+            function predict() {
+                hands.send({image: video});
+                requestAnimationFrame(predict);
+            }
+            predict();
         }
-        detectHands();
+        canvas.addEventListener("mousedown", () => { isDrawing = true; ctx.beginPath(); });
+        canvas.addEventListener("mouseup", () => { isDrawing = false; });
+        window.onload = main;
     </script>
 </body>
 </html>
